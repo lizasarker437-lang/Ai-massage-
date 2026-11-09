@@ -220,7 +220,7 @@ jobs:
               private var isProcessing = false
 
               // এখানে আপনার আসল Gemini API Key বসিয়ে নিতে পারেন
-              private val GEMINI_API_KEY = "YOUR_GEMINI_API_KEY"
+              private val GEMINI_API_KEY = "AQ.Ab8RN6Kx0-DwRkxJO3ZZUlDNbC7u1BnFOIuAsN1opA6zNdXHmw"
 
               override fun onServiceConnected() {
                   super.onServiceConnected()
