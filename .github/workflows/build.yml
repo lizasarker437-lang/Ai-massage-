@@ -1,4 +1,4 @@
-name: Build WA AI Responder APK
+name: Build WhatsApp AI Auto-Responder APK
 
 on:
   push:
@@ -10,218 +10,480 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
+          distribution: 'zulu'
           java-version: '17'
-          distribution: 'temurin'
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
-        with:
-          gradle-version: '8.5'
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
 
-      - name: Generate Complete Android Project Automatically
+      - name: Scaffold Complete Android Project Files
         run: |
-          mkdir -p app/src/main/java/com/example/waairesp
+          mkdir -p app/src/main/java/com/example/wa_ai_floating
           mkdir -p app/src/main/res/layout
-          mkdir -p app/src/main/res/xml
+          mkdir -p app/src/main/res/drawable
           mkdir -p app/src/main/res/values
 
-          # settings.gradle
-          echo 'pluginManagement { repositories { google() mavenCentral() gradlePluginPortal() } } dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS) repositories { google() mavenCentral() } } rootProject.name = "WAAIAutoResponder" include ":app"' > settings.gradle
+          # 1. Root build.gradle
+          cat << 'EOF' > build.gradle
+          buildscript {
+              ext.kotlin_version = '1.9.22'
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+              dependencies {
+                  classpath 'com.android.tools.build:gradle:8.2.2'
+                  classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+              }
+          }
+          allprojects {
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          EOF
 
-          # build.gradle (Project)
-          echo 'plugins { id "com.android.application" version "8.2.0" apply false id "org.jetbrains.kotlin.android" version "1.9.20" apply false }' > build.gradle
+          # 2. settings.gradle
+          cat << 'EOF' > settings.gradle
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "WhatsAppAIFloating"
+          include ':app'
+          EOF
 
-          # gradle.properties
-          echo -e "org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8\nandroid.useAndroidX=true\nkotlin.code.style=official\nandroid.nonTransitiveRClass=true" > gradle.properties
+          # 3. gradle.properties
+          cat << 'EOF' > gradle.properties
+          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          android.useAndroidX=true
+          android.enableJetifier=true
+          EOF
 
-          # app/build.gradle
-          echo 'plugins { id "com.android.application" id "org.jetbrains.kotlin.android" } android { namespace "com.example.waairesp" compileSdk 34 defaultConfig { applicationId "com.example.waairesp" minSdk 24 targetSdk 34 versionCode 1 versionName "1.0" } buildTypes { release { minifyEnabled false } } compileOptions { sourceCompatibility JavaVersion.VERSION_17 targetCompatibility JavaVersion.VERSION_17 } kotlinOptions { jvmTarget = "17" } } dependencies { implementation "androidx.core:core-ktx:1.12.0" implementation "androidx.appcompat:appcompat:1.6.1" implementation "com.google.android.material:material:1.11.0" implementation "com.google.ai.client.generativeai:generativeai:0.2.0" }' > app/build.gradle
+          # 4. app/build.gradle
+          cat << 'EOF' > app/build.gradle
+          plugins {
+              id 'com.android.application'
+              id 'kotlin-android'
+          }
+          android {
+              namespace 'com.example.wa_ai_floating'
+              compileSdk 34
+              defaultConfig {
+                  applicationId "com.example.wa_ai_floating"
+                  minSdk 24
+                  targetSdk 34
+                  versionCode 1
+                  versionName "1.0"
+              }
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+              kotlinOptions {
+                  jvmTarget = '17'
+              }
+          }
+          dependencies {
+              implementation 'androidx.core:core-ktx:1.12.0'
+              implementation 'androidx.appcompat:appcompat:1.6.1'
+              implementation 'com.google.android.material:material:1.11.0'
+              implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
+          }
+          EOF
 
-          # AndroidManifest.xml
-          echo '<manifest xmlns:android="http://schemas.android.com/apk/res/android"><uses-permission android:name="android.permission.INTERNET" /><uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" /><uses-permission android:name="android.permission.BIND_ACCESSIBILITY_SERVICE" /><uses-permission android:name="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE" /><uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" /><uses-permission android:name="android.permission.WAKE_LOCK" /><application android:allowBackup="true" android:label="WA Ai Auto Responder" android:supportsRtl="true" android:theme="@style/Theme.AppCompat.Light.NoActionBar"><activity android:name=".MainActivity" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter></activity><service android:name=".AIWhatsAppService" android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE" android:exported="false"><intent-filter><action android:name="android.accessibilityservice.AccessibilityService" /></intent-filter><meta-data android:name="android.accessibilityservice" android:resource="@xml/accessibility_service_config" /></service><service android:name=".WA_NotificationListener" android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE" android:exported="false"><intent-filter><action android:name="android.service.notification.NotificationListenerService" /></intent-filter></service></application></manifest>' > app/src/main/AndroidManifest.xml
+          # 5. AndroidManifest.xml
+          cat << 'EOF' > app/src/main/AndroidManifest.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+              <application
+                  android:allowBackup="true"
+                  android:label="WA AI Responder"
+                  android:theme="@style/Theme.AppCompat.Light.NoActionBar">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+                  <service
+                      android:name=".WhatsAppNotificationService"
+                      android:label="WhatsApp AI Listener"
+                      android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.service.notification.NotificationListenerService" />
+                      </intent-filter>
+                  </service>
+                  <service
+                      android:name=".FloatingBubbleService"
+                      android:enabled="true"
+                      android:exported="false" />
+              </application>
+          </manifest>
+          EOF
 
-          # accessibility_service_config.xml
-          echo '<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android" android:accessibilityEventTypes="typeWindowContentChanged|typeWindowStateChanged" android:accessibilityFeedbackType="feedbackGeneric" android:canPerformGestures="true" android:canRetrieveWindowContent="true" android:description="@string/accessibility_desc" />' > app/src/main/res/xml/accessibility_service_config.xml
+          # 6. MainActivity.kt (UI & Permissions)
+          cat << 'EOF' > app/src/main/java/com/example/wa_ai_floating/MainActivity.kt
+          package com.example.wa_ai_floating
 
-          # strings.xml
-          echo '<resources><string name="app_name">WA Ai Auto Responder</string><string name="accessibility_desc">WhatsApp AI Auto Responder Accessibility Service</string></resources>' > app/src/main/res/values/strings.xml
-
-          # activity_main.xml
-          echo '<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:background="#F0FDF4" android:padding="20dp"><TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="🤖 Gemini AI WhatsApp Bot" android:textSize="22sp" android:textStyle="bold" android:textColor="#047857" android:layout_marginBottom="16dp"/><TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="আপনার Gemini API Key দিন:" android:textSize="14sp" android:textColor="#334155" android:layout_marginBottom="8dp"/><EditText android:id="@+id/apiKeyInput" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="AIzaSy..." android:inputType="textPassword" android:textSize="14sp" android:background="#FFFFFF" android:padding="12dp" android:layout_marginBottom="12dp"/><Button android:id="@+id/saveKeyBtn" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="API Key সংরক্ষণ করুন" android:backgroundTint="#059669" android:textColor="#FFFFFF" android:layout_marginBottom="12dp"/><Button android:id="@+id/accessibilityBtn" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="⚙️ ACCESSIBILITY পার্মিশন অন করুন" android:backgroundTint="#0D9488" android:textColor="#FFFFFF" android:layout_marginBottom="12dp"/><Button android:id="@+id/notificationPermBtn" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="🔔 NOTIFICATION ACCESS পার্মিশন দিন" android:backgroundTint="#2563EB" android:textColor="#FFFFFF" android:layout_marginBottom="16dp"/><TextView android:id="@+id/statusText" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="স্ট্যাটাস..." android:textSize="14sp" android:textStyle="bold" android:textColor="#1E293B" android:padding="12dp" android:background="#DCFCE7"/></LinearLayout>' > app/src/main/res/layout/activity_main.xml
-
-          # MainActivity.kt
-          echo 'package com.example.waairesp
-          import android.content.Context
           import android.content.Intent
+          import android.net.Uri
+          import android.os.Build
           import android.os.Bundle
           import android.provider.Settings
           import android.widget.Button
-          import android.widget.EditText
-          import android.widget.TextView
           import android.widget.Toast
           import androidx.appcompat.app.AppCompatActivity
+
           class MainActivity : AppCompatActivity() {
-              private lateinit var apiKeyInput: EditText
-              private lateinit var saveKeyBtn: Button
-              private lateinit var accessibilityBtn: Button
-              private lateinit var notificationPermBtn: Button
-              private lateinit var statusText: TextView
               override fun onCreate(savedInstanceState: Bundle?) {
                   super.onCreate(savedInstanceState)
                   setContentView(R.layout.activity_main)
-                  apiKeyInput = findViewById(R.id.apiKeyInput)
-                  saveKeyBtn = findViewById(R.id.saveKeyBtn)
-                  accessibilityBtn = findViewById(R.id.accessibilityBtn)
-                  notificationPermBtn = findViewById(R.id.notificationPermBtn)
-                  statusText = findViewById(R.id.statusText)
-                  val prefs = getSharedPreferences("ai_bot_prefs", Context.MODE_PRIVATE)
-                  apiKeyInput.setText(prefs.getString("gemini_key", ""))
-                  saveKeyBtn.setOnClickListener {
-                      val key = apiKeyInput.text.toString().trim()
-                      if (key.isNotEmpty()) {
-                          prefs.edit().putString("gemini_key", key).apply()
-                          Toast.makeText(this, "API Key সংরক্ষিত হয়েছে!", Toast.LENGTH_SHORT).show()
+
+                  findViewById<Button>(R.id.btnPermissionOverlay).setOnClickListener {
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+                          startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
                       } else {
-                          Toast.makeText(this, "দয়া করে সঠিক Key দিন", Toast.LENGTH_SHORT).show()
+                          Toast.makeText(this, "Overlay Permission Already Granted", Toast.LENGTH_SHORT).show()
                       }
                   }
-                  accessibilityBtn.setOnClickListener {
-                      try { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) } catch (e: Exception) {}
-                  }
-                  notificationPermBtn.setOnClickListener {
-                      try { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) } catch (e: Exception) {}
-                  }
-              }
-              override fun onResume() {
-                  super.onResume()
-                  val isAccEnabled = AIWhatsAppService.instance != null
-                  statusText.text = if (isAccEnabled) "স্ট্যাটাস: সার্ভিস সচল ও প্রস্তুত ✅" else "স্ট্যাটাস: Accessibility বা Notification পার্মিশন দিন ❌"
-              }
-          }' > app/src/main/java/com/example/waairesp/MainActivity.kt
 
-          # AIWhatsAppService.kt
-          echo 'package com.example.waairesp
-          import android.accessibilityservice.AccessibilityService
-          import android.content.Context
-          import android.os.Bundle
-          import android.view.accessibility.AccessibilityEvent
-          import android.view.accessibility.AccessibilityNodeInfo
-          class AIWhatsAppService : AccessibilityService() {
-              companion object { var instance: AIWhatsAppService? = null }
-              override fun onServiceConnected() { super.onServiceConnected(); instance = this }
-              override fun onDestroy() { super.onDestroy(); if (instance == this) instance = null }
-              override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
-              override fun onInterrupt() {}
-              fun sendAutomatedReply(replyText: String) {
-                  val rootNode = rootInActiveWindow ?: return
-                  typeAndSend(rootNode, replyText)
-              }
-              private fun typeAndSend(rootNode: AccessibilityNodeInfo, text: String) {
-                  var entryNode: AccessibilityNodeInfo? = null
-                  val possibleIds = listOf("com.whatsapp:id/entry", "com.whatsapp:id/conversation_text_entry")
-                  for (id in possibleIds) {
-                      val nodes = rootNode.findAccessibilityNodeInfosByViewId(id)
-                      if (!nodes.isNullOrEmpty()) { entryNode = nodes[0]; break }
+                  findViewById<Button>(R.id.btnPermissionNotification).setOnClickListener {
+                      startActivity(Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS"))
                   }
-                  if (entryNode == null) { entryNode = findEditableNode(rootNode) }
-                  if (entryNode != null && entryNode.isEditable) {
-                      try {
-                          val arguments = Bundle().apply { putCharSequence("ACTION_ARGUMENT_SET_TEXT_VALUE", text) }
-                          entryNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
-                      } catch (e: Exception) {
-                          val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                          val clip = android.content.ClipData.newPlainText("ai_reply", text)
-                          clipboard.setPrimaryClip(clip)
-                          entryNode.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
-                          entryNode.performAction(AccessibilityNodeInfo.ACTION_PASTE)
-                      }
-                      trySendButton(rootNode)
-                  }
-              }
-              private fun findEditableNode(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
-                  if (node == null) return null
-                  if (node.isEditable) return node
-                  for (i in 0 until node.childCount) {
-                      val editable = findEditableNode(node.getChild(i))
-                      if (editable != null) return editable
-                  }
-                  return null
-              }
-              private fun trySendButton(rootNode: AccessibilityNodeInfo) {
-                  val sendIds = listOf("com.whatsapp:id/send", "com.whatsapp:id/ok_btn")
-                  for (id in sendIds) {
-                      val nodes = rootNode.findAccessibilityNodeInfosByViewId(id)
-                      if (!nodes.isNullOrEmpty()) {
-                          for (node in nodes) { if (node.isClickable) { node.performAction(AccessibilityNodeInfo.ACTION_CLICK); return } }
-                      }
-                  }
-                  clickSendByDescription(rootNode)
-              }
-              private fun clickSendByDescription(node: AccessibilityNodeInfo?): Boolean {
-                  if (node == null) return false
-                  val desc = node.contentDescription?.toString()?.lowercase() ?: ""
-                  val text = node.text?.toString()?.lowercase() ?: ""
-                  if (desc.contains("send") || desc.contains("পাঠান") || text.contains("send")) {
-                      if (node.isClickable) { return node.performAction(AccessibilityNodeInfo.ACTION_CLICK) }
-                  }
-                  for (i in 0 until node.childCount) { if (clickSendByDescription(node.getChild(i))) return true }
-                  return false
-              }
-          }' > app/src/main/java/com/example/waairesp/AIWhatsAppService.kt
 
-          # WA_NotificationListener.kt
-          echo 'package com.example.waairesp
+                  findViewById<Button>(R.id.btnStartService).setOnClickListener {
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+                          Toast.makeText(this, "Please grant Overlay Permission first", Toast.LENGTH_SHORT).show()
+                          return@setOnClickListener
+                      }
+                      startService(Intent(this, FloatingBubbleService::class.java))
+                      Toast.makeText(this, "Floating Bubble Started!", Toast.LENGTH_SHORT).show()
+                  }
+              }
+          }
+          EOF
+
+          # 7. WhatsAppNotificationService.kt (Auto Read & AI Reply)
+          cat << 'EOF' > app/src/main/java/com/example/wa_ai_floating/WhatsAppNotificationService.kt
+          package com.example.wa_ai_floating
+
           import android.app.Notification
+          import android.app.RemoteInput
+          import android.content.Intent
+          import android.os.Bundle
           import android.service.notification.NotificationListenerService
           import android.service.notification.StatusBarNotification
-          import android.content.Context
-          import com.google.ai.client.generativeai.GenerativeModel
-          import kotlinx.coroutines.CoroutineScope
-          import kotlinx.coroutines.Dispatchers
-          import kotlinx.coroutines.launch
-          class WA_NotificationListener : NotificationListenerService() {
-              private val scope = CoroutineScope(Dispatchers.IO)
+          import kotlinx.coroutines.*
+          import org.json.JSONObject
+          import java.net.HttpURLConnection
+          import java.net.URL
+
+          class WhatsAppNotificationService : NotificationListenerService() {
+              private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
               override fun onNotificationPosted(sbn: StatusBarNotification?) {
                   super.onNotificationPosted(sbn)
                   if (sbn == null) return
+
                   val pkg = sbn.packageName
-                  if (pkg == "com.whatsapp") {
+                  if (pkg == "com.whatsapp" || pkg == "com.whatsapp.w4b") {
                       val extras = sbn.notification.extras
-                      val title = extras.getString(Notification.EXTRA_TITLE)
-                      val text = extras.getString(Notification.EXTRA_TEXT)
-                      if (!text.isNullOrEmpty() && !title.isNullOrEmpty()) {
-                          if (text.startsWith("You:") || text.contains("new messages")) return
-                          processAIAutoReply(text)
+                      val title = extras.getString(Notification.EXTRA_TITLE) ?: ""
+                      val message = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: ""
+
+                      if (message.isEmpty() || title.contains("messages") || title.contains("WhatsApp")) return
+
+                      sendBroadcastUpdate(title, message, "AI টাইপ করছে...")
+
+                      serviceScope.launch {
+                          delay(2000)
+                          val reply = generateAiReply(message)
+                          sendDirectReply(sbn.notification, reply)
+                          sendBroadcastUpdate(title, message, reply)
                       }
                   }
               }
-              private fun processAIAutoReply(incomingMessage: String) {
-                  val prefs = getSharedPreferences("ai_bot_prefs", Context.MODE_PRIVATE)
-                  val apiKey = prefs.getString("gemini_key", "") ?: ""
-                  if (apiKey.isEmpty()) return
-                  scope.launch {
-                      try {
-                          val generativeModel = GenerativeModel(modelName = "gemini-1.5-flash", apiKey = apiKey)
-                          val prompt = "You are a helpful AI assistant replying on WhatsApp. Give a short, natural, and polite reply to this message: \"$incomingMessage\""
-                          val response = generativeModel.generateContent(prompt)
-                          val aiReply = response.text?.trim() ?: "Hello! Thanks for your message."
-                          AIWhatsAppService.instance?.sendAutomatedReply(aiReply)
-                      } catch (e: Exception) { e.printStackTrace() }
+
+              private fun sendDirectReply(notification: Notification, replyText: String) {
+                  val actions = notification.actions?.toList() ?: emptyList()
+                  for (action in actions) {
+                      val remoteInputs = action.remoteInputs ?: continue
+                      for (remoteInput in remoteInputs) {
+                          val bundle = Bundle().apply { putCharSequence(remoteInput.resultKey, replyText) }
+                          val intent = Intent()
+                          RemoteInput.addResultsToIntent(arrayOf(remoteInput), intent, bundle)
+                          try { action.actionIntent.send(this, 0, intent) } catch (e: Exception) { e.printStackTrace() }
+                          return
+                      }
                   }
               }
-          }' > app/src/main/java/com/example/waairesp/WA_NotificationListener.kt
+
+              private suspend fun generateAiReply(userPrompt: String): String {
+                  return withContext(Dispatchers.IO) {
+                      try {
+                          val apiKey = "YOUR_GEMINI_API_KEY"
+                          val url = URL("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$apiKey")
+                          val conn = (url.openConnection() as HttpURLConnection).apply {
+                              requestMethod = "POST"
+                              setRequestProperty("Content-Type", "application/json")
+                              connectTimeout = 8000
+                              readTimeout = 8000
+                              doOutput = true
+                          }
+                          val payload = """
+                              {"contents":[{"parts":[{"text":"তুমি একজন বিনয়ী কাস্টমার সহকারী। গ্রাহকের প্রশ্নের সংক্ষিপ্ত ও যথাযথ উত্তর দাও।\\n\\nপ্রশ্ন: $userPrompt"}]}]}
+                          """.trimIndent()
+                          conn.outputStream.write(payload.toByteArray(Charsets.UTF_8))
+                          val response = conn.inputStream.bufferedReader().use { it.readText() }
+                          val json = JSONObject(response)
+                          json.getJSONArray("candidates").getJSONObject(0).getJSONObject("content").getJSONArray("parts").getJSONObject(0).getString("text").trim()
+                      } catch (e: Exception) {
+                          "ধন্যবাদ মেসেজ দেওয়ার জন্য। আমরা শীঘ্রই বিস্তারিত তথ্য জানাচ্ছি।"
+                      }
+                  }
+              }
+
+              private fun sendBroadcastUpdate(sender: String, msg: String, reply: String) {
+                  val intent = Intent("UPDATE_BUBBLE_LOG").apply {
+                      putExtra("sender", sender)
+                      putExtra("msg", msg)
+                      putExtra("reply", reply)
+                  }
+                  sendBroadcast(intent)
+              }
+
+              override fun onDestroy() {
+                  super.onDestroy()
+                  serviceScope.cancel()
+              }
+          }
+          EOF
+
+          # 8. FloatingBubbleService.kt (Draggable Bubble Overlay)
+          cat << 'EOF' > app/src/main/java/com/example/wa_ai_floating/FloatingBubbleService.kt
+          package com.example.wa_ai_floating
+
+          import android.annotation.SuppressLint
+          import android.app.Service
+          import android.content.BroadcastReceiver
+          import android.content.Context
+          import android.content.Intent
+          import android.content.IntentFilter
+          import android.graphics.PixelFormat
+          import android.os.Build
+          import android.os.IBinder
+          import android.view.*
+          import android.widget.ImageView
+          import android.widget.TextView
+
+          class FloatingBubbleService : Service() {
+              private lateinit var windowManager: WindowManager
+              private lateinit var floatingView: View
+              private lateinit var params: WindowManager.LayoutParams
+
+              private val logReceiver = object : BroadcastReceiver() {
+                  override fun onReceive(context: Context?, intent: Intent?) {
+                      val sender = intent?.getStringExtra("sender") ?: ""
+                      val reply = intent?.getStringExtra("reply") ?: ""
+                      floatingView.findViewById<TextView>(R.id.tvBubbleStatus).text = "$sender: $reply"
+                  }
+              }
+
+              @SuppressLint("InflateParams", "ClickableViewAccessibility")
+              override fun onCreate() {
+                  super.onCreate()
+                  windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+                  floatingView = LayoutInflater.from(this).inflate(R.layout.layout_floating_bubble, null)
+
+                  val layoutType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                      WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                  } else {
+                      @Suppress("DEPRECATION")
+                      WindowManager.LayoutParams.TYPE_PHONE
+                  }
+
+                  params = WindowManager.LayoutParams(
+                      WindowManager.LayoutParams.WRAP_CONTENT,
+                      WindowManager.LayoutParams.WRAP_CONTENT,
+                      layoutType,
+                      WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                      PixelFormat.TRANSLUCENT
+                  ).apply {
+                      gravity = Gravity.TOP or Gravity.START
+                      x = 80
+                      y = 250
+                  }
+
+                  windowManager.addView(floatingView, params)
+
+                  val bubbleIcon = floatingView.findViewById<ImageView>(R.id.ivBubbleIcon)
+                  bubbleIcon.setOnTouchListener(object : View.OnTouchListener {
+                      private var initialX = 0
+                      private var initialY = 0
+                      private var initialTouchX = 0f
+                      private var initialTouchY = 0f
+
+                      override fun onTouch(v: View?, event: MotionEvent): Boolean {
+                          when (event.action) {
+                              MotionEvent.ACTION_DOWN -> {
+                                  initialX = params.x
+                                  initialY = params.y
+                                  initialTouchX = event.rawX
+                                  initialTouchY = event.rawY
+                                  return true
+                              }
+                              MotionEvent.ACTION_MOVE -> {
+                                  params.x = initialX + (event.rawX - initialTouchX).toInt()
+                                  params.y = initialY + (event.rawY - initialTouchY).toInt()
+                                  windowManager.updateViewLayout(floatingView, params)
+                                  return true
+                              }
+                          }
+                          return false
+                      }
+                  })
+
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                      registerReceiver(logReceiver, IntentFilter("UPDATE_BUBBLE_LOG"), RECEIVER_NOT_EXPORTED)
+                  } else {
+                      registerReceiver(logReceiver, IntentFilter("UPDATE_BUBBLE_LOG"))
+                  }
+              }
+
+              override fun onDestroy() {
+                  super.onDestroy()
+                  if (::floatingView.isInitialized) windowManager.removeView(floatingView)
+                  unregisterReceiver(logReceiver)
+              }
+
+              override fun onBind(intent: Intent?): IBinder? = null
+          }
+          EOF
+
+          # 9. Layouts & Drawables
+          cat << 'EOF' > app/src/main/res/layout/activity_main.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:layout_width="match_parent"
+              android:layout_height="match_parent"
+              android:orientation="vertical"
+              android:gravity="center"
+              android:padding="24dp"
+              android:background="#0F172A">
+              <TextView
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:text="WhatsApp AI Auto-Responder"
+                  android:textColor="#FFFFFF"
+                  android:textSize="20sp"
+                  android:textStyle="bold"
+                  android:layout_marginBottom="32dp"/>
+              <Button
+                  android:id="@+id/btnPermissionOverlay"
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:text="1. Allow Floating Permission"
+                  android:backgroundTint="#2563EB"
+                  android:textColor="#FFFFFF"
+                  android:layout_marginBottom="16dp"/>
+              <Button
+                  android:id="@+id/btnPermissionNotification"
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:text="2. Allow Notification Access"
+                  android:backgroundTint="#059669"
+                  android:textColor="#FFFFFF"
+                  android:layout_marginBottom="16dp"/>
+              <Button
+                  android:id="@+id/btnStartService"
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:text="3. Start Floating Bubble"
+                  android:backgroundTint="#7C3AED"
+                  android:textColor="#FFFFFF"/>
+          </LinearLayout>
+          EOF
+
+          cat << 'EOF' > app/src/main/res/layout/layout_floating_bubble.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:layout_width="wrap_content"
+              android:layout_height="wrap_content"
+              android:orientation="horizontal"
+              android:gravity="center_vertical"
+              android:background="@drawable/bubble_bg"
+              android:padding="8dp">
+              <ImageView
+                  android:id="@+id/ivBubbleIcon"
+                  android:layout_width="48dp"
+                  android:layout_height="48dp"
+                  android:src="@android:drawable/stat_notify_chat"
+                  android:background="@drawable/circle_green"
+                  android:padding="8dp"/>
+              <TextView
+                  android:id="@+id/tvBubbleStatus"
+                  android:layout_width="160dp"
+                  android:layout_height="wrap_content"
+                  android:layout_marginStart="8dp"
+                  android:text="AI Ready &amp; Listening..."
+                  android:textColor="#FFFFFF"
+                  android:textSize="12sp"
+                  android:maxLines="2"
+                  android:ellipsize="end"/>
+          </LinearLayout>
+          EOF
+
+          cat << 'EOF' > app/src/main/res/drawable/bubble_bg.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android">
+              <solid android:color="#E61E293B" />
+              <corners android:radius="24dp" />
+              <stroke android:width="1dp" android:color="#38BDF8" />
+          </shape>
+          EOF
+
+          cat << 'EOF' > app/src/main/res/drawable/circle_green.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="oval">
+              <solid android:color="#10B981" />
+          </shape>
+          EOF
+
+          cat << 'EOF' > app/src/main/res/values/strings.xml
+          <resources>
+              <string name="app_name">WA AI Responder</string>
+          </resources>
+          EOF
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
 
       - name: Build Debug APK
-        run: gradle assembleDebug
+        run: gradle assembleDebug --stacktrace
 
-      - name: Upload APK Artifact
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: WA-AI-Responder-APK
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: WhatsApp-AI-Floating-APK
+          path: app/build/outputs/apk/debug/*.apk
