@@ -23,28 +23,7 @@ jobs:
           mkdir -p app/src/main/res/drawable
           mkdir -p app/src/main/res/values
 
-          # 1. Root build.gradle
-          cat << 'EOF' > build.gradle
-          buildscript {
-              ext.kotlin_version = '1.9.22'
-              repositories {
-                  google()
-                  mavenCentral()
-              }
-              dependencies {
-                  classpath 'com.android.tools.build:gradle:8.2.2'
-                  classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
-              }
-          }
-          allprojects {
-              repositories {
-                  google()
-                  mavenCentral()
-              }
-          }
-          EOF
-
-          # 2. settings.gradle
+          # 1. Clean settings.gradle (আধুনিক গ্র্যাডল স্ট্যান্ডার্ড)
           cat << 'EOF' > settings.gradle
           pluginManagement {
               repositories {
@@ -62,6 +41,20 @@ jobs:
           }
           rootProject.name = "WhatsAppAIFloating"
           include ':app'
+          EOF
+
+          # 2. Root build.gradle (allprojects কনফ্লিক্ট ছাড়া)
+          cat << 'EOF' > build.gradle
+          buildscript {
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+              dependencies {
+                  classpath 'com.android.tools.build:gradle:8.2.2'
+                  classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.22'
+              }
+          }
           EOF
 
           # 3. gradle.properties
