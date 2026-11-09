@@ -44,7 +44,7 @@ jobs:
           include ':app'
           EOF
 
-          # 2. build.gradle (Root)
+          # 2. build.gradle
           cat << 'EOF' > build.gradle
           buildscript {
               repositories {
@@ -78,8 +78,8 @@ jobs:
                   applicationId "com.example.wa_ai_floating"
                   minSdk 24
                   targetSdk 34
-                  versionCode 2
-                  versionName "2.0"
+                  versionCode 3
+                  versionName "3.0"
               }
               compileOptions {
                   sourceCompatibility JavaVersion.VERSION_17
@@ -121,6 +121,7 @@ jobs:
               <application
                   android:allowBackup="true"
                   android:label="WA AI Responder"
+                  android:usesCleartextTraffic="true"
                   android:theme="@style/Theme.AppCompat.Light.NoActionBar">
                   
                   <activity
@@ -132,7 +133,6 @@ jobs:
                       </intent-filter>
                   </activity>
 
-                  <!-- স্ক্রিন রিড ও অটো-টাইপিং এক্সেসিবিলিটি সার্ভিস -->
                   <service
                       android:name=".WhatsAppAccessibilityService"
                       android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
@@ -181,7 +181,7 @@ jobs:
 
                   findViewById<Button>(R.id.btnPermissionAccessibility).setOnClickListener {
                       startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                      Toast.makeText(this, "Installed Apps থেকে 'WA AI Responder' চালু করুন", Toast.LENGTH_LONG).show()
+                      Toast.makeText(this, "Installed Apps থেকে 'WA AI Responder' অন করুন", Toast.LENGTH_LONG).show()
                   }
 
                   findViewById<Button>(R.id.btnStartService).setOnClickListener {
@@ -196,7 +196,7 @@ jobs:
           }
           EOF
 
-          # 8. WhatsAppAccessibilityService.kt (লাস্ট মেসেজ রিড, AI প্রসেস এবং টাইপ করে সেন্ড)
+          # 8. WhatsAppAccessibilityService.kt (রিসোর্সফুল স্ক্যান + ফলব্যাক + অটো-সেন্ড)
           cat << 'EOF' > app/src/main/java/com/example/wa_ai_floating/WhatsAppAccessibilityService.kt
           package com.example.wa_ai_floating
 
@@ -219,14 +219,11 @@ jobs:
               private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
               private var isProcessing = false
 
-              companion object {
-                  var instance: WhatsAppAccessibilityService? = null
-              }
+              // এখানে আপনার আসল Gemini API Key বসিয়ে নিতে পারেন
+              private val GEMINI_API_KEY = "YOUR_GEMINI_API_KEY"
 
               override fun onServiceConnected() {
                   super.onServiceConnected()
-                  instance = this
-
                   val filter = IntentFilter("ACTION_TRIGGER_AUTO_REPLY")
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                       registerReceiver(triggerReceiver, filter, RECEIVER_NOT_EXPORTED)
@@ -237,34 +234,34 @@ jobs:
 
               private val triggerReceiver = object : BroadcastReceiver() {
                   override fun onReceive(context: Context?, intent: Intent?) {
+                      if (isProcessing) return
                       processScreenAndReply()
                   }
               }
 
-              override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-                  // রিয়েল টাইমে উইন্ডো ট্র্যাক করে
-              }
+              override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
 
-              fun processScreenAndReply() {
-                  if (isProcessing) return
-                  val rootNode = rootInActiveWindow ?: return
+              private fun processScreenAndReply() {
+                  val rootNode = rootInActiveWindow
+                  if (rootNode == null) {
+                      sendBubbleStatus("স্ক্রিন রিড করা যায়নি")
+                      return
+                  }
 
-                  // হোয়াটসঅ্যাপের মেসেজগুলো লিস্ট থেকে বের করা
                   val messageList = mutableListOf<String>()
                   extractTextNodes(rootNode, messageList)
 
                   if (messageList.isEmpty()) {
-                      sendBubbleStatus("কোনো মেসেজ পাওয়া যায়নি")
+                      sendBubbleStatus("কোনো টেক্সট পাওয়া যায়নি")
                       return
                   }
 
-                  // স্ক্রিনে থাকা একদম শেষের মেসেজটি নির্বাচন
+                  // একদম শেষ মেসেজটি পিক করা
                   val lastMessage = messageList.last()
-                  sendBubbleStatus("রিড: $lastMessage")
+                  sendBubbleStatus("মেসেজ: $lastMessage")
 
                   isProcessing = true
                   serviceScope.launch {
-                      sendBubbleStatus("AI উত্তর লিখছে...")
                       val replyText = generateAiReply(lastMessage)
 
                       withContext(Dispatchers.Main) {
@@ -278,10 +275,11 @@ jobs:
                   if (node == null) return
                   val text = node.text?.toString()?.trim()
 
-                  // হোয়াটসঅ্যাপের সিস্টেম বাটন ও টাইমস্ট্যাম্প ফিল্টার
                   if (!text.isNullOrEmpty() &&
                       text.length > 1 &&
                       !text.equals("Type a message", ignoreCase = true) &&
+                      !text.equals("Message", ignoreCase = true) &&
+                      !text.contains("হোয়াটসঅ্যাপ স্ক্রিন") &&
                       !text.matches(Regex("^[0-9]{1,2}:[0-9]{2}(\\s?[APMapm]{2})?$"))
                   ) {
                       list.add(text)
@@ -295,78 +293,95 @@ jobs:
               private fun typeAndSendMessage(text: String) {
                   val rootNode = rootInActiveWindow ?: return
 
-                  // WhatsApp-এর টেক্সট ইনপুট ফিল্ড খুঁজে বের করা (entry বা EditText)
-                  val inputNodes = rootNode.findAccessibilityNodeInfosByViewId("com.whatsapp:id/entry")
-                  val targetInput = if (inputNodes.isNotEmpty()) {
-                      inputNodes[0]
-                  } else {
-                      findFirstEditText(rootNode)
+                  // হোয়াটসঅ্যাপের মেসেজ বক্স খোঁজা
+                  var targetInput = findNodeByViewIds(rootNode, listOf("com.whatsapp:id/entry", "com.whatsapp:id/conversation_text_entry"))
+                  if (targetInput == null) {
+                      targetInput = findFirstEditText(rootNode)
                   }
 
                   if (targetInput != null) {
-                      // ১. টেক্সট টাইপিং অ্যাকশন
+                      // টেক্সট পেস্ট করা
                       val arguments = Bundle().apply {
                           putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
                       }
                       targetInput.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
+                      sendBubbleStatus("টাইপ হয়েছে, সেন্ড করা হচ্ছে...")
 
-                      // ২. মানুষের মতো কিছুটা বিরতি দিয়ে সেন্ড বাটনে ক্লিক করা
+                      // অল্প বিরতি দিয়ে সেন্ড বাটনে ক্লিক
                       serviceScope.launch {
-                          delay(800)
+                          delay(500)
                           withContext(Dispatchers.Main) {
                               val currentRoot = rootInActiveWindow ?: return@withContext
-                              val sendButtons = currentRoot.findAccessibilityNodeInfosByViewId("com.whatsapp:id/send")
-                              if (sendButtons.isNotEmpty()) {
-                                  sendButtons[0].performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                                  sendBubbleStatus("পাঠানো হয়েছে: $text")
+                              var sendButton = findNodeByViewIds(currentRoot, listOf("com.whatsapp:id/send", "com.whatsapp:id/send_container"))
+                              
+                              if (sendButton == null) {
+                                  val sendNodes = currentRoot.findAccessibilityNodeInfosByText("Send")
+                                  if (sendNodes.isNotEmpty()) sendButton = sendNodes[0]
+                              }
+
+                              if (sendButton != null) {
+                                  sendButton.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                                  sendBubbleStatus("সফলভাবে রিপ্লাই পাঠানো হয়েছে!")
                               } else {
-                                  // সেন্ড বাটন আইডি না পেলে কন্টেন্ট ডেসক্রিপশন দিয়ে খোঁজা
-                                  val sendByDesc = currentRoot.findAccessibilityNodeInfosByText("Send")
-                                  if (sendByDesc.isNotEmpty()) {
-                                      sendByDesc[0].performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                                      sendBubbleStatus("পাঠানো হয়েছে: $text")
-                                  } else {
-                                      sendBubbleStatus("টাইপ হয়েছে, সেন্ড বাটন মেলেনি")
-                                  }
+                                  sendBubbleStatus("টাইপ হয়েছে, Send বাটনে চাপ দিন")
                               }
                           }
                       }
                   } else {
-                      sendBubbleStatus("হোয়াটসঅ্যাপ চ্যাট বক্স পাওয়া যায়নি")
+                      sendBubbleStatus("চ্যাট ইনপুট বক্স মেলেনি")
                   }
+              }
+
+              private fun findNodeByViewIds(root: AccessibilityNodeInfo, ids: List<String>): AccessibilityNodeInfo? {
+                  for (id in ids) {
+                      val nodes = root.findAccessibilityNodeInfosByViewId(id)
+                      if (nodes.isNotEmpty()) return nodes[0]
+                  }
+                  return null
               }
 
               private fun findFirstEditText(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
                   if (node == null) return null
                   if (node.className?.contains("EditText") == true) return node
                   for (i in 0 until node.childCount) {
-                      val result = findFirstEditText(node.getChild(i))
-                      if (result != null) return result
+                      val res = findFirstEditText(node.getChild(i))
+                      if (res != null) return res
                   }
                   return null
               }
 
               private suspend fun generateAiReply(userPrompt: String): String {
+                  // যদি API Key না দেওয়া থাকে তবে স্মার্ট রুল-বেসড রিপ্লাই দেবে (ফ্রিজ হবে না)
+                  if (GEMINI_API_KEY == "YOUR_GEMINI_API_KEY" || GEMINI_API_KEY.isEmpty()) {
+                      delay(800)
+                      return when {
+                          userPrompt.contains("Hi", true) || userPrompt.contains("Hello", true) || userPrompt.contains("Hy", true) -> 
+                              "হ্যালো! কেমন আছেন? আমি কীভাবে সাহায্য করতে পারি?"
+                          userPrompt.contains("দাম", true) || userPrompt.contains("price", true) -> 
+                              "আমাদের পণ্যের বিস্তারিত মূল্য তালিকা ইনবক্সে দেওয়া হচ্ছে।"
+                          else -> "জি পেয়েছি। আমি একটু দেখে আপনাকে বিস্তারিত জানাচ্ছি।"
+                      }
+                  }
+
                   return withContext(Dispatchers.IO) {
                       try {
-                          val apiKey = "YOUR_GEMINI_API_KEY"
-                          val url = URL("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$apiKey")
+                          val url = URL("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$GEMINI_API_KEY")
                           val conn = (url.openConnection() as HttpURLConnection).apply {
                               requestMethod = "POST"
                               setRequestProperty("Content-Type", "application/json")
-                              connectTimeout = 8000
-                              readTimeout = 8000
+                              connectTimeout = 6000
+                              readTimeout = 6000
                               doOutput = true
                           }
                           val payload = """
-                              {"contents":[{"parts":[{"text":"তুমি একজন বিনয়ী ও বাস্তবসম্মত কাস্টমার সহকারী। নিচের মেসেজের প্রেক্ষাপটে ১-২ লাইনে সরাসরি ও প্রফেশনাল উত্তর দাও:\\n\\nমেসেজ: $userPrompt"}]}]}
+                              {"contents":[{"parts":[{"text":"তুমি একজন বিনয়ী সহকারী। এই মেসেজের সংক্ষিপ্ত ১ লাইনের বাস্তবসম্মত রিপ্লাই দাও:\\n\\n$userPrompt"}]}]}
                           """.trimIndent()
                           conn.outputStream.write(payload.toByteArray(Charsets.UTF_8))
                           val response = conn.inputStream.bufferedReader().use { it.readText() }
                           val json = JSONObject(response)
                           json.getJSONArray("candidates").getJSONObject(0).getJSONObject("content").getJSONArray("parts").getJSONObject(0).getString("text").trim()
                       } catch (e: Exception) {
-                          "ধন্যবাদ। আপনার মেসেজটি পেয়েছি, কিছুক্ষণের মধ্যে উত্তর দিচ্ছি।"
+                          "ধন্যবাদ। আপনার মেসেজটি পেয়েছি, খুব দ্রুত জানাচ্ছি।"
                       }
                   }
               }
@@ -384,12 +399,11 @@ jobs:
                   super.onDestroy()
                   serviceScope.cancel()
                   try { unregisterReceiver(triggerReceiver) } catch (e: Exception) {}
-                  instance = null
               }
           }
           EOF
 
-          # 9. FloatingBubbleService.kt (ফ্লোটিং বাবল UI এবং ক্লিক ইভেন্ট)
+          # 9. FloatingBubbleService.kt
           cat << 'EOF' > app/src/main/java/com/example/wa_ai_floating/FloatingBubbleService.kt
           package com.example.wa_ai_floating
 
@@ -476,8 +490,7 @@ jobs:
                                   val diffX = abs(event.rawX - initialTouchX)
                                   val diffY = abs(event.rawY - initialTouchY)
 
-                                  // ড্র্যাগ না করে বাবলে ট্যাপ করলে লাস্ট মেসেজ রিড ও অটো-টাইপ ট্রিগার হবে
-                                  if (clickDuration < 300 && diffX < 15 && diffY < 15) {
+                                  if (clickDuration < 350 && diffX < 20 && diffY < 20) {
                                       sendBroadcast(Intent("ACTION_TRIGGER_AUTO_REPLY"))
                                       floatingView.findViewById<TextView>(R.id.tvBubbleStatus).text = "হোয়াটসঅ্যাপ স্ক্রিন স্ক্যান হচ্ছে..."
                                   }
