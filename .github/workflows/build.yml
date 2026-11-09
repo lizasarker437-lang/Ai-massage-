@@ -78,8 +78,8 @@ jobs:
                   applicationId "com.example.wa_ai_floating"
                   minSdk 24
                   targetSdk 34
-                  versionCode 5
-                  versionName "5.0"
+                  versionCode 7
+                  versionName "7.0"
               }
               compileOptions {
                   sourceCompatibility JavaVersion.VERSION_17
@@ -175,13 +175,13 @@ jobs:
                       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
                           startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
                       } else {
-                          Toast.makeText(this, "ফ্লোটিং পারমিশন সচল আছে", Toast.LENGTH_SHORT).show()
+                          Toast.makeText(this, "ফ্লোটিং উইন্ডো পারমিশন চালু আছে", Toast.LENGTH_SHORT).show()
                       }
                   }
 
                   findViewById<Button>(R.id.btnPermissionAccessibility).setOnClickListener {
                       startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                      Toast.makeText(this, "Accessibility থেকে 'WA AI Responder' চালু করুন", Toast.LENGTH_LONG).show()
+                      Toast.makeText(this, "Accessibility থেকে 'WA AI Responder' অন করুন", Toast.LENGTH_LONG).show()
                   }
 
                   findViewById<Button>(R.id.btnStartService).setOnClickListener {
@@ -196,7 +196,7 @@ jobs:
           }
           EOF
 
-          # 8. WhatsAppAccessibilityService.kt (স্মার্ট ডুপ্লিকেট লক + আইকন স্ট্যাটাস ট্র্যাকিং)
+          # 8. WhatsAppAccessibilityService.kt (বাস্তবসম্মত প্রসঙ্গের ওপর ভিত্তি করে AI রিপ্লাই)
           cat << 'EOF' > app/src/main/java/com/example/wa_ai_floating/WhatsAppAccessibilityService.kt
           package com.example.wa_ai_floating
 
@@ -218,34 +218,54 @@ jobs:
 
               private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
               private var isReplying = false
+              private var isAutomationEnabled = true
               
-              // শেষ কোন মেসেজের রিপ্লাই পাঠানো হয়েছে তা ট্র্যাক করার জন্য
               private var lastRepliedMessage = ""
               private var mySentMessageHistory = mutableSetOf<String>()
-              
               private var debounceJob: Job? = null
-              private val GEMINI_API_KEY = "AQ.Ab8RN6JDd-HFftqZqAzGjRlV53Dn1ojz-fvbB35jpebimshhPA"
+              
+              // Google AI Studio থেকে নেওয়া কি বসাতে পারেন, অথবা ডিফল্ট রাখা যাবে
+              private val GEMINI_API_KEY = "YOUR_GEMINI_API_KEY"
 
               override fun onServiceConnected() {
                   super.onServiceConnected()
-                  val filter = IntentFilter("ACTION_MANUAL_TRIGGER")
-                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                      registerReceiver(manualTriggerReceiver, filter, RECEIVER_NOT_EXPORTED)
-                  } else {
-                      registerReceiver(manualTriggerReceiver, filter)
+                  val filter = IntentFilter().apply {
+                      addAction("ACTION_TOGGLE_AUTOMATION")
+                      addAction("ACTION_MANUAL_TRIGGER")
                   }
-                  sendBubbleState("অটো-ডিটেকশন রেডি", false)
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                      registerReceiver(commandReceiver, filter, RECEIVER_NOT_EXPORTED)
+                  } else {
+                      registerReceiver(commandReceiver, filter)
+                  }
+                  sendBubbleStatus("অটোমেশন: চালু আছে", false, isAutomationEnabled)
               }
 
-              private val manualTriggerReceiver = object : BroadcastReceiver() {
+              private val commandReceiver = object : BroadcastReceiver() {
                   override fun onReceive(context: Context?, intent: Intent?) {
-                      lastRepliedMessage = "" // ম্যানুয়াল চাপ দিলে ফোর্স স্ক্যান
-                      checkAndProcessScreen()
+                      when (intent?.action) {
+                          "ACTION_TOGGLE_AUTOMATION" -> {
+                              isAutomationEnabled = intent.getBooleanExtra("enabled", true)
+                              if (!isAutomationEnabled) {
+                                  debounceJob?.cancel()
+                                  isReplying = false
+                                  sendBubbleStatus("অটোমেশন: বন্ধ ⏸️", false, false)
+                              } else {
+                                  sendBubbleStatus("অটোমেশন: চালু আছে ▶️", false, true)
+                              }
+                          }
+                          "ACTION_MANUAL_TRIGGER" -> {
+                              if (isAutomationEnabled) {
+                                  lastRepliedMessage = ""
+                                  checkAndProcessScreen()
+                              }
+                          }
+                      }
                   }
               }
 
               override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-                  if (event == null || isReplying) return
+                  if (!isAutomationEnabled || event == null || isReplying) return
 
                   val pkg = event.packageName?.toString() ?: ""
                   if (pkg != "com.whatsapp" && pkg != "com.whatsapp.w4b") return
@@ -255,7 +275,7 @@ jobs:
                       
                       debounceJob?.cancel()
                       debounceJob = serviceScope.launch {
-                          delay(1500) // মেসেজ আসার পর স্ক্রিন স্ট্যাবল হওয়ার সময়
+                          delay(1800) // মেসেজ আসা শেষ হওয়া পর্যন্ত অপেক্ষা
                           withContext(Dispatchers.Main) {
                               checkAndProcessScreen()
                           }
@@ -264,37 +284,33 @@ jobs:
               }
 
               private fun checkAndProcessScreen() {
-                  if (isReplying) return
+                  if (!isAutomationEnabled || isReplying) return
                   val rootNode = rootInActiveWindow ?: return
 
-                  // চ্যাট স্ক্রিন নিশ্চিত হওয়া (মেসেজ ইনপুট বক্স আছে কিনা)
                   val inputBox = findInputBox(rootNode) ?: return
-
                   val messages = mutableListOf<String>()
                   extractMessages(rootNode, messages)
 
                   if (messages.isEmpty()) return
                   val latestMessage = messages.last()
 
-                  // ১. যদি এই মেসেজে ইতিমধ্যে রিপ্লাই দেওয়া হয়ে থাকে, তবে কোনো কাজ করবে না (লুপ বন্ধ)
+                  // একই মেসেজ বা নিজের মেসেজ হলে রিপ্লাই যাবে না
                   if (latestMessage == lastRepliedMessage) return
-
-                  // ২. যদি মেসেজটি নিজের পাঠানো রিপ্লাই হয়, তবে অপেক্ষা করবে (বিপরীত পক্ষ থেকে মেসেজ না আসা পর্যন্ত থামবে)
                   if (mySentMessageHistory.contains(latestMessage)) return
 
-                  // বিপরীত পক্ষের নতুন মেসেজ নিশ্চিত হলো
                   isReplying = true
                   lastRepliedMessage = latestMessage
 
-                  // বাবলে ইন্ডিকেটর অন করা (আইকন টাইপিং শুরু করবে)
-                  sendBubbleState("AI টাইপিং করতেছে...", true)
+                  sendBubbleStatus("📋 মেসেজ রিড হয়েছে...", true, isAutomationEnabled)
 
                   serviceScope.launch {
-                      val reply = generateAiReply(latestMessage)
+                      delay(600)
+                      sendBubbleStatus("✍️ AI টাইপ করছে...", true, isAutomationEnabled)
+                      
+                      // মেসেজের ওপর ভিত্তি করে উত্তর তৈরি
+                      val reply = generateContextualAiReply(latestMessage)
 
-                      // ঠিক ২ সেকেন্ড টাইপিং ডিলে বজায় রাখা
-                      delay(2000)
-
+                      delay(1800)
                       withContext(Dispatchers.Main) {
                           typeAndSend(reply)
                       }
@@ -309,9 +325,10 @@ jobs:
                       text.length > 1 &&
                       !text.equals("Type a message", ignoreCase = true) &&
                       !text.equals("Message", ignoreCase = true) &&
-                      !text.contains("অটো-ডিটেকশন") &&
-                      !text.contains("AI টাইপিং") &&
-                      !text.contains("হোয়াটসঅ্যাপ") &&
+                      !text.contains("অটোমেশন:") &&
+                      !text.contains("মেসেজ রিড") &&
+                      !text.contains("AI টাইপ") &&
+                      !text.contains("মেসেজ পাঠানো") &&
                       !text.matches(Regex("^[0-9]{1,2}:[0-9]{2}(\\s?[APMapm]{2})?$"))
                   ) {
                       list.add(text)
@@ -326,7 +343,7 @@ jobs:
                   val rootNode = rootInActiveWindow
                   if (rootNode == null) {
                       isReplying = false
-                      sendBubbleState("অটো-ডিটেকশন রেডি", false)
+                      sendBubbleStatus("অটোমেশন: চালু আছে", false, isAutomationEnabled)
                       return
                   }
 
@@ -337,8 +354,10 @@ jobs:
                       }
                       targetInput.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, bundle)
 
+                      sendBubbleStatus("🚀 মেসেজ পাঠানো হচ্ছে...", true, isAutomationEnabled)
+
                       serviceScope.launch {
-                          delay(500)
+                          delay(600)
                           withContext(Dispatchers.Main) {
                               val refreshedRoot = rootInActiveWindow
                               if (refreshedRoot != null) {
@@ -346,12 +365,12 @@ jobs:
                                   if (sendBtn != null) {
                                       sendBtn.performAction(AccessibilityNodeInfo.ACTION_CLICK)
                                       mySentMessageHistory.add(text)
-                                      sendBubbleState("পাঠানো হয়েছে! নতুন মেসেজের অপেক্ষায়...", false)
+                                      sendBubbleStatus("✅ পাঠানো সম্পন্ন!", false, isAutomationEnabled)
                                   } else {
-                                      sendBubbleState("টাইপ হয়েছে, সেন্ড চাপুন", false)
+                                      sendBubbleStatus("টাইপ হয়েছে, সেন্ড চাপুন", false, isAutomationEnabled)
                                   }
                               } else {
-                                  sendBubbleState("অটো-ডিটেকশন রেডি", false)
+                                  sendBubbleStatus("অটোমেশন: চালু আছে", false, isAutomationEnabled)
                               }
                               delay(2000)
                               isReplying = false
@@ -359,7 +378,7 @@ jobs:
                       }
                   } else {
                       isReplying = false
-                      sendBubbleState("অটো-ডিটেকশন রেডি", false)
+                      sendBubbleStatus("অটোমেশন: চালু আছে", false, isAutomationEnabled)
                   }
               }
 
@@ -393,46 +412,80 @@ jobs:
                   return null
               }
 
-              private suspend fun generateAiReply(userPrompt: String): String {
-                  if (GEMINI_API_KEY == "YOUR_GEMINI_API_KEY" || GEMINI_API_KEY.isEmpty()) {
-                      return when {
-                          userPrompt.contains("Hi", true) || userPrompt.contains("Hello", true) || userPrompt.contains("Hy", true) -> 
-                              "হ্যালো! কেমন আছেন? কী প্রয়োজনে নক করেছেন জানাবেন।"
-                          userPrompt.contains("দাম", true) || userPrompt.contains("price", true) -> 
-                              "আমাদের পণ্যের বিস্তারিত মূল্য তালিকা দেওয়া হচ্ছে।"
-                          userPrompt.contains("আছেন", true) -> 
-                              "জি, আমি লাইনে আছি। বলুন কীভাবে সহায়তা করতে পারি?"
-                          else -> "জি ধন্যবাদ। বিষয়টি লক্ষ্য করেছি, দ্রুত জানাচ্ছি।"
+              /**
+               * বিপরীত পক্ষ থেকে পাঠানো মেসেজের উপর ভিত্তি করে বাস্তবসম্মত উত্তর তৈরি
+               */
+              private suspend fun generateContextualAiReply(userPrompt: String): String {
+                  // ১. ক্লাউড এআই কল (Gemini API Key থাকলে)
+                  if (GEMINI_API_KEY != "YOUR_GEMINI_API_KEY" && GEMINI_API_KEY.isNotEmpty()) {
+                      val cloudReply = withContext(Dispatchers.IO) {
+                          try {
+                              val url = URL("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$GEMINI_API_KEY")
+                              val conn = (url.openConnection() as HttpURLConnection).apply {
+                                  requestMethod = "POST"
+                                  setRequestProperty("Content-Type", "application/json")
+                                  connectTimeout = 5000
+                                  readTimeout = 5000
+                                  doOutput = true
+                              }
+                              val systemInstruction = "তুমি একজন বাস্তবসম্মত, বিনয়ী ও বিচক্ষণ ব্যক্তি হিসেবে উত্তর দেবে। কোনো রোবোটিক ভাব থাকবে না। বিপরীত পক্ষের প্রশ্ন বা কথার সরাসরি ১ লাইনের স্বাভাবিক ও বাস্তবসম্মত উত্তর দেবে।"
+                              val payload = """
+                                  {"contents":[{"parts":[{"text":"$systemInstruction\\n\\nবিপরীত পক্ষের মেসেজ: $userPrompt\\nতোমার বাস্তবসম্মত উত্তর:"}]}]}
+                              """.trimIndent()
+                              conn.outputStream.write(payload.toByteArray(Charsets.UTF_8))
+                              val response = conn.inputStream.bufferedReader().use { it.readText() }
+                              val json = JSONObject(response)
+                              json.getJSONArray("candidates").getJSONObject(0).getJSONObject("content").getJSONArray("parts").getJSONObject(0).getString("text").trim()
+                          } catch (e: Exception) {
+                              null
+                          }
                       }
+                      if (!cloudReply.isNullOrBlank()) return cloudReply
                   }
 
-                  return withContext(Dispatchers.IO) {
-                      try {
-                          val url = URL("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$GEMINI_API_KEY")
-                          val conn = (url.openConnection() as HttpURLConnection).apply {
-                              requestMethod = "POST"
-                              setRequestProperty("Content-Type", "application/json")
-                              connectTimeout = 5000
-                              readTimeout = 5000
-                              doOutput = true
-                          }
-                          val payload = """
-                              {"contents":[{"parts":[{"text":"তুমি একজন অত্যন্ত বিনয়ী ও বিচক্ষণ কাস্টমার সহকারী। নিচের মেসেজের খুব চমৎকার ও বাস্তবসম্মত ১ লাইনের সংক্ষিপ্ত উত্তর দাও:\\n\\n$userPrompt"}]}]}
-                          """.trimIndent()
-                          conn.outputStream.write(payload.toByteArray(Charsets.UTF_8))
-                          val response = conn.inputStream.bufferedReader().use { it.readText() }
-                          val json = JSONObject(response)
-                          json.getJSONArray("candidates").getJSONObject(0).getJSONObject("content").getJSONArray("parts").getJSONObject(0).getString("text").trim()
-                      } catch (e: Exception) {
-                          "ধন্যবাদ। আপনার মেসেজটি গ্রহণ করা হয়েছে।"
-                      }
+                  // ২. লোকাল কনটেক্সচুয়াল ইঞ্জিন (যেটি মেসেজের অর্থ ও প্রেক্ষাপট অনুযায়ী বাস্তবসম্মত উত্তর দেবে)
+                  val clean = userPrompt.lowercase()
+                  return when {
+                      // সালাম ও কুশলাদি
+                      clean.contains("সালাম") || clean.contains("slam") || clean.contains("assalamu") -> 
+                          "ওয়ালাইকুম আসসালাম। কেমন আছেন?"
+                      clean.contains("কেমন আছ") || clean.contains("kemon") || clean.contains("how are you") -> 
+                          "আলহামদুলিল্লাহ ভালো আছি। আপনার দিনকাল কেমন যাচ্ছে?"
+                      clean.contains("hi") || clean.contains("hello") || clean.contains("hy") || clean.contains("hey") -> 
+                          "হ্যালো! বলুন, কী খবর?"
+
+                      // খোঁজখবর ও অবস্থান
+                      clean.contains("কই") || clean.contains("কোথায়") || clean.contains("where") -> 
+                          "একটু কাজে আছি, কিছু বলবেন?"
+                      clean.contains("আছেন") || clean.contains("online") || clean.contains("achen") -> 
+                          "জি লাইনে আছি, বলুন।"
+                      clean.contains("ফ্রি") || clean.contains("free") || clean.contains("সময়") -> 
+                          "জি বলুন, শুনতে পাচ্ছি।"
+
+                      // কেনাবেচা বা দরদাম
+                      clean.contains("দাম") || clean.contains("price") || clean.contains("rate") || clean.contains("টাকা") -> 
+                          "এটির বর্তমান প্রাইস ও বিস্তারিত ইনবক্সে শেয়ার করছি।"
+                      clean.contains("পণ্য") || clean.contains("product") || clean.contains("অর্ডার") || clean.contains("order") -> 
+                          "জি এভেইলেবল আছে। আপনি কয়টি নিতে চাচ্ছেন?"
+                      clean.contains("ডেলিভারি") || clean.contains("delivery") -> 
+                          "সারা দেশেই ডেলিভারি দেওয়া যাবে, আপনার লোকেশন কোথায়?"
+
+                      // কৃতজ্ঞতা ও সম্মতি
+                      clean.contains("ধন্যবাদ") || clean.contains("thanks") || clean.contains("thank you") -> 
+                          "আপনাকেও অনেক ধন্যবাদ!"
+                      clean.contains("ঠিক আছে") || clean.contains("ok") || clean.contains("accha") || clean.contains("আচ্ছা") -> 
+                          "জি ঠিক আছে।"
+
+                      // সাধারণ বা অন্যান্য মেসেজ
+                      else -> "জি আপনার মেসেজটি পেয়েছি। একটু পর বিস্তারিত কথা বলছি।"
                   }
               }
 
-              private fun sendBubbleState(msg: String, isTyping: Boolean) {
+              private fun sendBubbleStatus(msg: String, isWorking: Boolean, isEnabled: Boolean) {
                   val intent = Intent("UPDATE_BUBBLE_STATUS").apply {
                       putExtra("status", msg)
-                      putExtra("isTyping", isTyping)
+                      putExtra("isWorking", isWorking)
+                      putExtra("isEnabled", isEnabled)
                   }
                   sendBroadcast(intent)
               }
@@ -442,12 +495,12 @@ jobs:
               override fun onDestroy() {
                   super.onDestroy()
                   serviceScope.cancel()
-                  try { unregisterReceiver(manualTriggerReceiver) } catch (e: Exception) {}
+                  try { unregisterReceiver(commandReceiver) } catch (e: Exception) {}
               }
           }
           EOF
 
-          # 9. FloatingBubbleService.kt (অ্যানিমেটেড আইকন + রিয়েল-টাইম টাইপিং ইন্ডিকেটর)
+          # 9. FloatingBubbleService.kt (অ্যানিমেটেড বাবল ও টগল সুইচ)
           cat << 'EOF' > app/src/main/java/com/example/wa_ai_floating/FloatingBubbleService.kt
           package com.example.wa_ai_floating
 
@@ -459,10 +512,12 @@ jobs:
           import android.content.Context
           import android.content.Intent
           import android.content.IntentFilter
+          import android.graphics.Color
           import android.graphics.PixelFormat
           import android.os.Build
           import android.os.IBinder
           import android.view.*
+          import android.widget.Button
           import android.widget.ImageView
           import android.widget.TextView
           import kotlin.math.abs
@@ -474,25 +529,34 @@ jobs:
               private lateinit var params: WindowManager.LayoutParams
               private lateinit var bubbleIcon: ImageView
               private lateinit var statusText: TextView
+              private lateinit var btnToggle: Button
+              
               private var pulseAnimator: ObjectAnimator? = null
+              private var isAutomationActive = true
 
               private val statusReceiver = object : BroadcastReceiver() {
                   override fun onReceive(context: Context?, intent: Intent?) {
                       val status = intent?.getStringExtra("status") ?: ""
-                      val isTyping = intent?.getBooleanExtra("isTyping", false) ?: false
+                      val isWorking = intent?.getBooleanExtra("isWorking", false) ?: false
+                      val isEnabled = intent?.getBooleanExtra("isEnabled", true) ?: true
 
                       statusText.text = status
+                      isAutomationActive = isEnabled
+                      updateToggleUI()
 
-                      if (isTyping) {
-                          // টাইপিং অবস্থা: আইকন কমলা হবে এবং পালস অ্যানিমেশন চলবে
+                      if (isWorking) {
                           bubbleIcon.setImageResource(android.R.drawable.ic_menu_edit)
                           bubbleIcon.setBackgroundResource(R.drawable.circle_amber)
-                          startPulseAnimation()
+                          startPulse()
                       } else {
-                          // সাধারণ অবস্থা: আইকন সবুজ এবং স্থির
-                          stopPulseAnimation()
-                          bubbleIcon.setImageResource(android.R.drawable.stat_notify_chat)
-                          bubbleIcon.setBackgroundResource(R.drawable.circle_green)
+                          stopPulse()
+                          if (isAutomationActive) {
+                              bubbleIcon.setImageResource(android.R.drawable.stat_notify_chat)
+                              bubbleIcon.setBackgroundResource(R.drawable.circle_green)
+                          } else {
+                              bubbleIcon.setImageResource(android.R.drawable.ic_delete)
+                              bubbleIcon.setBackgroundResource(R.drawable.circle_red)
+                          }
                       }
                   }
               }
@@ -505,6 +569,7 @@ jobs:
 
                   bubbleIcon = floatingView.findViewById(R.id.ivBubbleIcon)
                   statusText = floatingView.findViewById(R.id.tvBubbleStatus)
+                  btnToggle = floatingView.findViewById(R.id.btnToggleAutomation)
 
                   val layoutType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                       WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -521,11 +586,20 @@ jobs:
                       PixelFormat.TRANSLUCENT
                   ).apply {
                       gravity = Gravity.TOP or Gravity.START
-                      x = 60
-                      y = 280
+                      x = 40
+                      y = 260
                   }
 
                   windowManager.addView(floatingView, params)
+
+                  btnToggle.setOnClickListener {
+                      isAutomationActive = !isAutomationActive
+                      val toggleIntent = Intent("ACTION_TOGGLE_AUTOMATION").apply {
+                          putExtra("enabled", isAutomationActive)
+                      }
+                      sendBroadcast(toggleIntent)
+                      updateToggleUI()
+                  }
 
                   bubbleIcon.setOnTouchListener(object : View.OnTouchListener {
                       private var initialX = 0
@@ -555,7 +629,7 @@ jobs:
                                   val diffX = abs(event.rawX - initialTouchX)
                                   val diffY = abs(event.rawY - initialTouchY)
 
-                                  if (clickDuration < 350 && diffX < 20 && diffY < 20) {
+                                  if (clickDuration < 300 && diffX < 20 && diffY < 20) {
                                       sendBroadcast(Intent("ACTION_MANUAL_TRIGGER"))
                                       statusText.text = "ম্যানুয়াল চেক..."
                                   }
@@ -573,7 +647,19 @@ jobs:
                   }
               }
 
-              private fun startPulseAnimation() {
+              private fun updateToggleUI() {
+                  if (isAutomationActive) {
+                      btnToggle.text = "ON"
+                      btnToggle.setBackgroundColor(Color.parseColor("#10B981"))
+                      bubbleIcon.setBackgroundResource(R.drawable.circle_green)
+                  } else {
+                      btnToggle.text = "OFF"
+                      btnToggle.setBackgroundColor(Color.parseColor("#EF4444"))
+                      bubbleIcon.setBackgroundResource(R.drawable.circle_red)
+                  }
+              }
+
+              private fun startPulse() {
                   if (pulseAnimator == null) {
                       pulseAnimator = ObjectAnimator.ofFloat(bubbleIcon, "alpha", 1f, 0.35f, 1f).apply {
                           duration = 750
@@ -585,14 +671,14 @@ jobs:
                   }
               }
 
-              private fun stopPulseAnimation() {
+              private fun stopPulse() {
                   pulseAnimator?.cancel()
                   bubbleIcon.alpha = 1.0f
               }
 
               override fun onDestroy() {
                   super.onDestroy()
-                  stopPulseAnimation()
+                  stopPulse()
                   if (::floatingView.isInitialized) windowManager.removeView(floatingView)
                   unregisterReceiver(statusReceiver)
               }
@@ -601,7 +687,7 @@ jobs:
           }
           EOF
 
-          # 10. Layouts & Drawables (নতুন সার্কেল ড্রয়েবল যুক্ত)
+          # 10. Layouts & Drawables
           cat << 'EOF' > app/src/main/res/layout/activity_main.xml
           <?xml version="1.0" encoding="utf-8"?>
           <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
@@ -657,35 +743,47 @@ jobs:
               android:orientation="horizontal"
               android:gravity="center_vertical"
               android:background="@drawable/bubble_bg"
-              android:padding="8dp">
+              android:padding="6dp">
 
               <ImageView
                   android:id="@+id/ivBubbleIcon"
-                  android:layout_width="44dp"
-                  android:layout_height="44dp"
+                  android:layout_width="40dp"
+                  android:layout_height="40dp"
                   android:src="@android:drawable/stat_notify_chat"
                   android:background="@drawable/circle_green"
-                  android:padding="8dp"/>
+                  android:padding="7dp"/>
 
               <TextView
                   android:id="@+id/tvBubbleStatus"
-                  android:layout_width="165dp"
+                  android:layout_width="150dp"
                   android:layout_height="wrap_content"
                   android:layout_marginStart="8dp"
-                  android:text="অটো-ডিটেকশন রেডি"
+                  android:layout_marginEnd="6dp"
+                  android:text="অটোমেশন: চালু আছে"
                   android:textColor="#FFFFFF"
                   android:textSize="12sp"
                   android:maxLines="2"
                   android:ellipsize="end"/>
+
+              <Button
+                  android:id="@+id/btnToggleAutomation"
+                  android:layout_width="48dp"
+                  android:layout_height="34dp"
+                  android:text="ON"
+                  android:textSize="10sp"
+                  android:textStyle="bold"
+                  android:textColor="#FFFFFF"
+                  android:backgroundTint="#10B981"
+                  android:padding="0dp"/>
           </LinearLayout>
           EOF
 
           cat << 'EOF' > app/src/main/res/drawable/bubble_bg.xml
           <?xml version="1.0" encoding="utf-8"?>
           <shape xmlns:android="http://schemas.android.com/apk/res/android">
-              <solid android:color="#E61E293B" />
+              <solid android:color="#F00F172A" />
               <corners android:radius="24dp" />
-              <stroke android:width="1dp" android:color="#38BDF8" />
+              <stroke android:width="1.5dp" android:color="#38BDF8" />
           </shape>
           EOF
 
@@ -696,7 +794,6 @@ jobs:
           </shape>
           EOF
 
-          # টাইপিং ইন্ডিকেটর এর জন্য কমলা রঙের সার্কেল
           cat << 'EOF' > app/src/main/res/drawable/circle_amber.xml
           <?xml version="1.0" encoding="utf-8"?>
           <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="oval">
@@ -704,10 +801,17 @@ jobs:
           </shape>
           EOF
 
+          cat << 'EOF' > app/src/main/res/drawable/circle_red.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="oval">
+              <solid android:color="#EF4444" />
+          </shape>
+          EOF
+
           cat << 'EOF' > app/src/main/res/values/strings.xml
           <resources>
-              <string name="app_name">WA AI Auto</string>
-              <string name="accessibility_desc">WhatsApp স্ক্রিন অটো-রিড ও অটো-টাইপ করার সার্ভিস</string>
+              <string name="app_name">WA AI Responder</string>
+              <string name="accessibility_desc">WhatsApp চ্যাট অটো-রিড ও অটো-টাইপ করার সার্ভিস</string>
           </resources>
           EOF
 
@@ -722,5 +826,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: WhatsApp-AI-Auto-APK
+          name: WhatsApp-AI-Responder-APK
           path: app/build/outputs/apk/debug/*.apk
