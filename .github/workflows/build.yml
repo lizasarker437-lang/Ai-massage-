@@ -16,9 +16,6 @@ jobs:
           distribution: 'zulu'
           java-version: '17'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Scaffold Complete Android Project Files
         run: |
           mkdir -p app/src/main/java/com/example/wa_ai_floating
@@ -142,7 +139,7 @@ jobs:
           </manifest>
           EOF
 
-          # 6. MainActivity.kt (UI & Permissions)
+          # 6. MainActivity.kt
           cat << 'EOF' > app/src/main/java/com/example/wa_ai_floating/MainActivity.kt
           package com.example.wa_ai_floating
 
@@ -184,7 +181,7 @@ jobs:
           }
           EOF
 
-          # 7. WhatsAppNotificationService.kt (Auto Read & AI Reply)
+          # 7. WhatsAppNotificationService.kt
           cat << 'EOF' > app/src/main/java/com/example/wa_ai_floating/WhatsAppNotificationService.kt
           package com.example.wa_ai_floating
 
@@ -280,7 +277,7 @@ jobs:
           }
           EOF
 
-          # 8. FloatingBubbleService.kt (Draggable Bubble Overlay)
+          # 8. FloatingBubbleService.kt
           cat << 'EOF' > app/src/main/java/com/example/wa_ai_floating/FloatingBubbleService.kt
           package com.example.wa_ai_floating
 
@@ -478,6 +475,8 @@ jobs:
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.5'
 
       - name: Build Debug APK
         run: gradle assembleDebug --stacktrace
